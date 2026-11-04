@@ -7,8 +7,7 @@ services:
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY:-cambia_esto_por_una_clave_larga}
       - ALLOWED_HOSTS=api.ipvu.itseprueba.com.ar
-      - CSRF_TRUSTED_ORIGINS=https://api.ipvu.itseprueba.com.ar
-
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
   client:
     build:
       context: ./client
