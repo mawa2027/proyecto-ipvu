@@ -1,11 +1,12 @@
 version: '3.8'
 
 services:
-  api:
+    api:
     build:
       context: ./api
-      dockerfile: Dockerfile  # Si no existe, Coolify intentará usar Nixpacks
+      # Sin dockerfile: Nixpacks detecta Python automáticamente
     restart: unless-stopped
+    # ... resto igual
     environment:
       - SERVICE_FQDN_API
       - DEBUG=False
@@ -15,11 +16,12 @@ services:
       # Agrega aquí las variables de base de datos si el proyecto las usa
     # Sin 'ports:' para que Coolify asigne dominio
 
-  client:
+    client:
     build:
       context: ./client
-      dockerfile: Dockerfile  # Si no existe, Coolify usará Nixpacks
+      # Sin dockerfile: Nixpacks detecta Node automáticamente
     restart: unless-stopped
+    # ... resto igual
     environment:
       - SERVICE_FQDN_CLIENT
       # Si el frontend necesita la URL de la API, agrégala aquí
