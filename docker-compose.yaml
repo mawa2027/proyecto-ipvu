@@ -17,8 +17,8 @@ services:
     # Sin 'ports:' para que Coolify asigne dominio
 
     client:
-    build:
-      context: ./client
+      build:
+        context: ./client
       # Sin dockerfile: Nixpacks detecta Node automáticamente
     restart: unless-stopped
     # ... resto igual
