@@ -1,0 +1,1075 @@
+DOCUMENTACION TECNICA DEL BACKEND - PROYECTO IPVU
+=================================================
+
+Fecha del relevamiento: 20 de junio de 2026
+Alcance: carpeta api/ del repositorio proyecto-ipvu
+
+
+1. OBJETIVO DEL BACKEND
+-----------------------
+
+El backend administra el circuito de expedientes habitacionales del IPVU. Su
+responsabilidad principal es recibir y validar datos, persistirlos en una base
+relacional, autenticar usuarios, aplicar permisos según el rol institucional y
+exponer una API HTTP consumida por el frontend.
+
+El dominio contempla:
+
+- postulantes titulares y sus integrantes familiares;
+- expedientes, estados y declaraciones juradas (DDJJ);
+- usuarios internos y roles;
+- asignación de expedientes a trabajadoras sociales;
+- formularios sociohabitacionales y dictámenes legales;
+- pases entre usuarios, acciones y notificaciones;
+- documentos y archivos vinculados a expedientes;
+- inicio de sesión, cambio inicial y recuperación de contraseña;
+- un reporte CSV de expedientes agrupados por estado.
+
+El proyecto sigue una arquitectura web por capas:
+
+  Cliente React
+       |
+       | solicitudes HTTP + JSON + token JWT
+       v
+  URLs / Router de Django REST Framework
+       |
+       v
+  Views y ViewSets (permisos y reglas de negocio)
+       |
+       v
+  Serializers (validación y transformación JSON <-> objetos)
+       |
+       v
+  Models + ORM de Django
+       |
+       v
+  Base de datos PostgreSQL
+
+
+2. ESTRUCTURA DEL BACKEND
+-------------------------
+
+api/
+|-- manage.py
+|-- requirements.txt
+|-- .env
+|-- ipvu_backend/
+|   |-- settings.py
+|   |-- urls.py
+|   |-- wsgi.py
+|   `-- asgi.py
+`-- gestion/
+    |-- models.py
+    |-- serializers.py
+    |-- views.py
+    |-- permissions.py
+    |-- urls.py
+    |-- admin.py
+    |-- apps.py
+    |-- tests.py
+    |-- migrations/
+    `-- management/commands/cargar_datos_prueba.py
+
+Responsabilidad de cada archivo:
+
+- manage.py: utilidad de línea de comandos de Django. Se usa para migrar la
+  base, ejecutar el servidor, crear administradores, correr verificaciones y
+  lanzar comandos personalizados.
+
+- settings.py: configuración general: aplicaciones instaladas, middleware,
+  base de datos, autenticación JWT, CORS, correo, archivos estáticos y media.
+
+- ipvu_backend/urls.py: enrutador raíz. Publica el panel /admin/ e incluye las
+  rutas de la aplicación gestion.
+
+- models.py: esquema y relaciones del dominio persistido.
+
+- serializers.py: contrato de entrada/salida de la API y validaciones.
+
+- views.py: endpoints, permisos por acción y reglas del flujo institucional.
+
+- permissions.py: clases reutilizables de autorización por rol.
+
+- gestion/urls.py: registra ViewSets con DefaultRouter y agrega las rutas de
+  autenticación y recuperación de contraseña.
+
+- admin.py: registra los modelos en el panel administrativo de Django.
+
+- migrations/: historial versionado de cambios en la estructura de la base.
+
+- management/commands/cargar_datos_prueba.py: comando para generar roles,
+  usuarios, postulantes y expedientes de desarrollo.
+
+- tests.py: lugar previsto para pruebas automáticas; actualmente no contiene
+  casos de prueba.
+
+
+3. TECNOLOGIAS Y HERRAMIENTAS UTILIZADAS
+----------------------------------------
+
+3.1. Django 6.0.3
+
+Django es el framework central. Aporta configuración, ciclo solicitud/respuesta,
+ORM, migraciones, autenticación, validadores, panel administrativo, manejo de
+archivos, correo y utilidades de seguridad.
+
+Ventajas de esta elección:
+
+- evita construir desde cero componentes sensibles como el hash de passwords,
+  sesiones administrativas, validación de datos y protección CSRF;
+- concentra el modelo del dominio en clases Python legibles;
+- permite evolucionar el esquema de base con migraciones reproducibles;
+- ofrece una convención clara de proyecto y aplicación;
+- cuenta con un panel administrativo útil para operar y depurar datos internos;
+- reduce la cantidad de código propio que debe mantenerse.
+
+La aplicación de negocio está encapsulada en una única app llamada gestion.
+Esto resulta simple y práctico para el tamaño actual. Si el sistema creciera,
+podría separarse por áreas, por ejemplo usuarios, expedientes y documentos.
+
+3.2. Django ORM y migraciones
+
+Los modelos heredan de django.db.models.Model. El ORM convierte operaciones
+Python en SQL, maneja relaciones y aplica restricciones declaradas en el modelo.
+
+Ventajas de su uso actual:
+
+- las claves foráneas expresan relaciones y políticas de borrado explícitas;
+- unique=True protege identificadores críticos como DNI, matrícula y DDJJ;
+- auto_now_add y auto_now crean marcas temporales automáticamente;
+- related_name facilita consultas inversas, por ejemplo integrantes,
+  historial_pases y documentos;
+- las migraciones 0001 a 0004 conservan la evolución del esquema y permiten
+  reproducirla en cada ambiente.
+
+3.3. Django REST Framework 3.17.1 (DRF)
+
+DRF transforma el proyecto Django en una API REST. Se utilizan ModelSerializer,
+Serializer, ModelViewSet, GenericViewSet, mixins, APIView, Response, @action,
+permisos y routers.
+
+Ventajas de haberlo usado de esta forma:
+
+- ModelSerializer reutiliza la definición de los modelos y reduce duplicación;
+- ModelViewSet genera automáticamente operaciones CRUD uniformes;
+- los mixins permiten publicar solamente las operaciones necesarias: por
+  ejemplo, los estados y roles son de lectura, y los historiales no se borran;
+- get_permissions permite variar permisos según la acción solicitada;
+- perform_create concentra efectos de negocio que deben ocurrir al crear datos;
+- @action agrega operaciones no CRUD, como el reporte CSV y el cambio de estado;
+- DefaultRouter genera rutas consistentes sin declararlas una por una.
+
+3.4. Simple JWT 5.5.1
+
+La autenticación de la API usa JSON Web Tokens mediante
+djangorestframework-simplejwt. El login entrega un access token y un refresh
+token. El access token dura cinco minutos y puede renovarse por una ruta
+específica.
+
+Ventajas:
+
+- encaja bien con un frontend React separado del backend;
+- evita mantener una sesión tradicional en el servidor para cada cliente;
+- el vencimiento corto reduce el tiempo útil de un access token filtrado;
+- el login personalizado entrega también nombre, rol y la obligación de cambiar
+  la contraseña, evitando solicitudes adicionales al iniciar la aplicación.
+
+Las rutas protegidas esperan el encabezado:
+
+  Authorization: Bearer <access_token>
+
+3.5. Autenticación y validación de passwords de Django
+
+Se reutiliza django.contrib.auth.models.User como identidad autenticable y se lo
+extiende con el modelo Usuario mediante una relación OneToOne. Las contraseñas
+se guardan con User.set_password/create_user, nunca como texto plano.
+
+También se reutilizan:
+
+- validate_password y los cuatro validadores configurados por Django;
+- default_token_generator para links de recuperación con vencimiento;
+- codificación segura del ID con urlsafe_base64_encode/decode;
+- send_mail para enviar las instrucciones de recuperación.
+
+Ventaja de la relación User + Usuario: Django conserva toda su implementación
+probada de autenticación y el proyecto agrega, sin duplicarla, matrícula, DNI,
+nombre institucional, rol y bandera de cambio de contraseña.
+
+3.6. Autorización basada en roles
+
+El sistema define cuatro roles:
+
+- TS: Trabajadora Social.
+- SU: Superusuario de la aplicación.
+- LG: Legales.
+- DE: Data Entry.
+
+permissions.py centraliza la comprobación en usuario_tiene_rol() y expone clases
+semánticas: IsSuperAdmin, IsDataEntry, IsLegales, IsTrabajadoraSocial,
+IsAnyRole e IsDataEntryOrSuperAdmin.
+
+Ventajas:
+
+- la autorización no queda repetida como condicional en todos los endpoints;
+- los nombres expresan la intención de negocio;
+- una petición anónima o un User sin perfil Usuario se rechaza de forma segura;
+- los permisos por acción aplican el principio de asignar capacidades distintas
+  para leer, crear, editar y eliminar.
+
+3.7. PostgreSQL, psycopg2-binary y dj-database-url
+
+La configuración utiliza DATABASE_URL, interpretada por dj-database-url, y el
+driver psycopg2-binary para PostgreSQL. Las conexiones pueden reutilizarse hasta
+600 segundos mediante conn_max_age.
+
+Ventajas:
+
+- PostgreSQL es apropiado para información relacional e integridad referencial;
+- una única URL permite configurar el acceso sin modificar el código;
+- la misma aplicación puede apuntar a bases distintas según el ambiente;
+- reutilizar conexiones reduce el costo de abrir una conexión por petición.
+
+3.8. python-dotenv
+
+load_dotenv() carga variables desde .env durante el desarrollo. Actualmente se
+leen SECRET_KEY, DATABASE_URL y RENDER_EXTERNAL_HOSTNAME.
+
+Ventaja: separa credenciales y datos de despliegue del código versionado. El
+archivo .env está excluido por api/.gitignore y no debe compartirse ni incluirse
+en commits.
+
+3.9. django-cors-headers
+
+CorsMiddleware permite que el frontend, servido desde otro origen, consuma la
+API. Es necesario durante el desarrollo habitual con React en localhost:3000 y
+Django en otro puerto.
+
+3.10. WhiteNoise
+
+WhiteNoiseMiddleware y CompressedManifestStaticFilesStorage preparan archivos
+estáticos comprimidos y con nombres versionados. Es una solución simple para
+servir los estáticos de Django sin agregar otro servidor dedicado en despliegues
+pequeños.
+
+3.11. Gunicorn, WSGI y ASGI
+
+- gunicorn es el servidor WSGI incluido para producción;
+- wsgi.py expone la aplicación síncrona usada normalmente por Gunicorn;
+- asgi.py deja disponible la interfaz asíncrona de Django para una evolución
+  futura hacia servidores ASGI, WebSockets o tareas de larga conexión.
+
+El servidor runserver debe reservarse para desarrollo.
+
+3.12. Herramientas estándar adicionales
+
+- csv + HttpResponse: generan el reporte descargable sin dependencias extra.
+- django.utils.timezone: calcula días respetando la configuración horaria.
+- django.db.models.Count: realiza la agregación del reporte en la base de datos.
+- FileField: recibe archivos y guarda su referencia en la base.
+- Django Admin: ofrece una interfaz interna para todos los modelos registrados.
+
+
+4. CONFIGURACION PRINCIPAL
+--------------------------
+
+Aplicaciones instaladas:
+
+- módulos estándar de Django: admin, auth, contenttypes, sessions, messages y
+  staticfiles;
+- rest_framework;
+- corsheaders;
+- gestion.
+
+Middleware relevante, en orden:
+
+- SecurityMiddleware;
+- WhiteNoiseMiddleware;
+- CorsMiddleware;
+- sesiones, normalización HTTP, CSRF, autenticación, mensajes y protección de
+  iframes de Django.
+
+Base de datos:
+
+- se obtiene desde DATABASE_URL;
+- conn_max_age=600 mantiene conexiones reutilizables.
+
+Zona horaria:
+
+- TIME_ZONE = America/Argentina/Buenos_Aires;
+- USE_TZ = True, por lo que Django trabaja internamente con fechas conscientes
+  de zona horaria.
+
+Archivos:
+
+- STATIC_URL = static/;
+- STATIC_ROOT = api/staticfiles;
+- MEDIA_URL = /media/;
+- MEDIA_ROOT = api/media;
+- los documentos de expedientes se guardan bajo media/expedientes/.
+
+Correo:
+
+- el backend actual es ConsoleEmailBackend;
+- los mensajes de recuperación se imprimen en la terminal en vez de enviarse;
+- FRONTEND_URL = http://localhost:3000 se utiliza para construir el link.
+
+REST Framework:
+
+- autenticación predeterminada: JWTAuthentication;
+- permiso global predeterminado: AllowAny;
+- las vistas de gestion agregan permisos explícitos según el rol.
+
+JWT:
+
+- duración del access token: cinco minutos;
+- existe un endpoint de refresh.
+
+
+5. MODELO DE DATOS
+------------------
+
+5.1. PostulanteTitular
+
+Representa a la persona titular de la solicitud habitacional.
+
+Campos principales: nombre, apellido, teléfono, DNI único, domicilio actual,
+email opcional, fecha de creación y fecha de modificación.
+
+Relaciones:
+
+- puede tener muchos IntegranteFamilia;
+- puede tener uno o más Expediente a nivel de esquema.
+
+El DNI único evita registrar dos titulares con el mismo identificador.
+
+5.2. IntegranteFamilia
+
+Registra DNI, nombre, apellido y parentesco de una persona perteneciente al grupo
+familiar. Su postulante_titular usa CASCADE: al borrar el titular también se
+eliminan sus integrantes, evitando familiares huérfanos.
+
+El related_name integrantes permite consultar:
+
+  postulante.integrantes.all()
+
+5.3. EstadoExpediente
+
+Catálogo controlado de estados:
+
+- SINI: Sin Iniciar.
+- 1V: 1ra Visita.
+- LEG: Legales.
+- DOCP: Documentación Presentada.
+- AP: Apto.
+- NOAP: No Apto.
+- NUEVAV: Nueva Visita.
+
+El uso de choices limita valores inválidos y get_nombre_display() brinda una
+etiqueta legible. nombre es único para impedir estados duplicados.
+
+5.4. Expediente
+
+Es la entidad central del dominio.
+
+Campos: fecha de creación, fecha límite para trabajo social, DDJJ opcional y
+única, y visto (booleano).
+
+Relaciones:
+
+- postulante_titular -> PostulanteTitular, CASCADE;
+- usuario_asignado -> User, SET_NULL y opcional;
+- estado_expediente -> EstadoExpediente, RESTRICT;
+- posee formularios, pases y documentos relacionados.
+
+Las políticas de borrado expresan reglas útiles:
+
+- SET_NULL conserva el expediente si se elimina el usuario asignado;
+- RESTRICT impide borrar un estado que todavía utilizan expedientes;
+- CASCADE elimina el expediente si se elimina su titular. Esta última decisión
+  debe revisarse si existe una obligación de conservación administrativa.
+
+5.5. Rol
+
+Catálogo de capacidades institucionales. Almacena código de dos caracteres y
+descripción. Usuario usa RESTRICT, por lo que un rol en uso no puede borrarse.
+
+5.6. Usuario
+
+Perfil institucional conectado uno a uno con User de Django. Guarda nombre,
+apellido, matrícula única, DNI, email único opcional, rol y la bandera
+requiere_cambio_password.
+
+La separación distingue dos responsabilidades:
+
+- User: credenciales, hash de password y autenticación;
+- Usuario: información y rol específicos del IPVU.
+
+5.7. DocumentoAdjunto
+
+Representa un tipo o referencia documental asociado a un expediente. Usa
+PROTECT, por lo que no se puede borrar el expediente mientras tenga registros
+DocumentoAdjunto vinculados.
+
+Este modelo no contiene un archivo; el archivo real corresponde a
+DocumentoExpediente.
+
+5.8. DocumentoExpediente
+
+Contiene un FileField, fecha automática y expediente. Los archivos se suben a
+media/expedientes/. El related_name documentos permite acceder a los archivos
+desde el expediente. CASCADE elimina sus registros si se borra el expediente.
+
+5.9. HistorialPase
+
+Registra cada transferencia: expediente, usuario de origen, usuario de destino,
+observación opcional y fecha. Los related_name pases_enviados y pases_recibidos
+facilitan las consultas por usuario.
+
+Los usuarios usan RESTRICT para conservar la identidad histórica de quien envió
+y recibió el pase.
+
+5.10. Notificacion
+
+Almacena mensaje, fecha, indicador de lectura y relaciones. En el código actual
+los nombres y tipos de dos relaciones presentan inconsistencias; se detallan en
+la sección de observaciones técnicas.
+
+5.11. HistorialAccion
+
+Guarda una descripción, fecha, perfil Usuario responsable y expediente. PROTECT
+preserva tanto el responsable como el expediente mientras exista la auditoría.
+
+5.12. FormularioSocioHabitacional
+
+Registra grupo familiar, situación habitacional, aspecto económico, salud,
+estudios, relevamiento vecinal y observaciones. Pertenece a un expediente y
+guarda creación/modificación automáticamente.
+
+5.13. DictamenLegal
+
+Registra observaciones, estado de sanción (APTO, NO APTO o EN REVISION), fecha,
+usuario institucional y expediente opcional. PROTECT conserva los datos
+referenciados por un dictamen.
+
+
+6. SERIALIZADORES Y CONTRATO DE DATOS
+-------------------------------------
+
+La mayoría son ModelSerializer con fields='__all__'. Esto brinda cobertura
+rápida del modelo y validación automática de tipos, obligatoriedad, choices,
+unicidad y relaciones.
+
+PostulanteTitularSerializer:
+
+- agrega ddjj como campo write_only que no pertenece al modelo Postulante;
+- el dato entra junto con el titular y se usa para crear el Expediente;
+- las fechas son de solo lectura.
+
+Esta técnica ofrece una operación simple para el frontend: una sola petición
+crea el titular y desencadena el alta del expediente.
+
+ExpedienteSerializer:
+
+- entrega estado_expediente como objeto anidado legible;
+- recibe estado_expediente_id como clave primaria write_only;
+- agrega dias_en_poder calculado desde fecha_creacion;
+- representa el postulante con id, nombre, apellido y DNI;
+- representa el usuario asignado con id, nombre y apellido.
+
+Separar la lectura anidada de la escritura por ID es una decisión útil: el
+cliente recibe información lista para mostrar, pero al editar manda solamente
+una referencia compacta.
+
+UsuarioSerializer:
+
+- al crear un perfil genera también un User de Django;
+- usa el DNI como username y password inicial;
+- no expone la contraseña en la respuesta;
+- agrega username_display y rol_display para el frontend.
+
+El nombre y apellido se guardan en el perfil Usuario, no en first_name y
+last_name del User de Django. Esta diferencia importa porque la representación
+de usuario_asignado en ExpedienteSerializer lee precisamente first_name y
+last_name; con el alta actual esos dos valores pueden aparecer vacíos.
+
+MiLoginPersonalizadoSerializer:
+
+- conserva access y refresh de Simple JWT;
+- agrega nombre_completo, rol_id y requiere_cambio_password.
+
+EstablecerPasswordInicialSerializer:
+
+- exige que el perfil todavía requiera el cambio;
+- confirma que ambas contraseñas coincidan;
+- aplica los validadores configurados en Django;
+- usa set_password y desactiva la bandera después del cambio.
+
+ConfirmarResetPasswordSerializer:
+
+- decodifica el usuario;
+- valida token y coincidencia de passwords;
+- aplica validate_password;
+- cambia el password de forma segura;
+- desactiva la obligación de cambio inicial si existe un perfil IPVU.
+
+
+7. FLUJOS DE NEGOCIO PRINCIPALES
+--------------------------------
+
+7.1. Alta de postulante y expediente
+
+1. Data Entry o Superusuario envía los datos a POST /api/postulantetitular/.
+2. El serializer valida y crea PostulanteTitular.
+3. perform_create extrae ddjj.
+4. Se busca el estado SINI.
+5. Se elige la siguiente trabajadora social.
+6. Se crea el Expediente asociado y asignado.
+
+Ventaja: el frontend realiza una operación de negocio coherente en una sola
+petición y no debe conocer todos los detalles de creación del expediente.
+
+7.2. Asignación rotativa de trabajadoras sociales
+
+obtener_siguiente_trabajadora_social() obtiene los User cuyo perfil tiene rol
+TS, ordenados por ID. Busca el último expediente asignado a una TS y elige el
+siguiente usuario de la lista; al llegar al final vuelve al primero.
+
+Ventajas:
+
+- distribución determinista y fácil de comprender;
+- no necesita una tabla adicional para guardar el turno;
+- si no hay trabajadoras sociales, el expediente puede quedar sin asignación
+  porque usuario_asignado acepta null.
+
+7.3. Visita sociohabitacional
+
+Una TS crea el formulario con POST /api/formulario/. perform_create lo guarda y
+cambia el expediente al estado 1V.
+
+Ventaja: el cambio de estado se deriva de una acción real y no queda librado a
+una segunda petición del frontend.
+
+7.4. Pase de expediente
+
+Cualquier rol autenticado puede crear un pase. El usuario de origen se toma del
+JWT, evitando que el cliente suplante manualmente al emisor.
+
+Si el expediente no está APTO:
+
+- destino con rol LG -> estado LEG;
+- cualquier otro destino -> estado 1V.
+
+El registro histórico conserva origen, destino, observación y fecha.
+
+7.5. Resolución de Legales
+
+El endpoint PATCH /api/expediente/{id}/cambiar_estado/ fue declarado con la
+intención de admitir solo el rol LG y permite cambiar a AP o NOAP. Sin embargo,
+el get_permissions() personalizado reemplaza en la práctica el permiso declarado
+por la acción; actualmente cualquier rol autenticado puede ejecutarla. La
+corrección necesaria se detalla en la sección de riesgos.
+
+DictamenLegal dispone además de un registro formal de observaciones y resultado.
+
+7.6. Reporte por estados
+
+GET /api/expediente/reporte-estados/ agrupa expedientes en la base mediante
+Count, incluye todos los estados aunque su cantidad sea cero y responde un CSV
+descargable llamado reporte_estados_expedientes.csv.
+
+Ventaja: la agregación se ejecuta en PostgreSQL y el archivo se transmite sin
+generar un archivo temporal en disco.
+
+7.7. Login y cambio inicial
+
+1. POST /api/login/ recibe username y password.
+2. Devuelve access, refresh y datos del perfil.
+3. Si requiere_cambio_password es true, el cliente dirige al cambio inicial.
+4. POST /api/establecer-password-inicial/ valida el JWT y la nueva contraseña.
+
+7.8. Recuperación de contraseña
+
+1. POST /api/password-reset/solicitar/ recibe un email.
+2. Si existe, crea uid y token y envía un enlace al frontend.
+3. La respuesta es idéntica exista o no el email, evitando revelar cuentas.
+4. POST /api/password-reset/confirmar/ valida uid, token y nueva contraseña.
+
+La respuesta neutra de solicitud es una buena práctica contra enumeración de
+usuarios.
+
+
+8. ENDPOINTS DE LA API
+----------------------
+
+Base habitual en desarrollo: http://localhost:8000/api/
+
+Los endpoints terminados en / se generan mediante DefaultRouter.
+
+8.1. Autenticación
+
+POST /api/login/
+  Obtiene access, refresh, nombre_completo, rol_id y bandera de cambio inicial.
+  Acceso público.
+
+POST /api/token/refresh/
+  Recibe refresh y devuelve un access renovado. Acceso público.
+
+POST /api/establecer-password-inicial/
+  Cambia la contraseña inicial. Requiere JWT válido.
+
+POST /api/password-reset/solicitar/
+  Inicia la recuperación por email. Acceso público.
+
+POST /api/password-reset/confirmar/
+  Confirma uid/token y establece la nueva contraseña. Acceso público.
+
+8.2. Recursos y métodos
+
+/api/postulantetitular/
+  GET lista, POST crea.
+/api/postulantetitular/{id}/
+  GET detalle, PUT/PATCH modifica, DELETE elimina.
+  Crear/modificar: DE o SU. Eliminar: SU. Leer: cualquier rol.
+
+/api/integrantefamilia/
+/api/integrantefamilia/{id}/
+  CRUD completo con el mismo esquema de permisos que postulantes.
+
+/api/estadoexpediente/
+/api/estadoexpediente/{id}/
+  Solo lista y detalle. Cualquier rol autenticado.
+
+/api/expediente/
+/api/expediente/{id}/
+  CRUD generado. Crear: DE. Modificar/eliminar: SU. Leer: cualquier rol.
+  Una TS solo recibe los expedientes cuyo usuario_asignado es ella.
+
+/api/expediente/reporte-estados/
+  GET de CSV. Cualquier rol autenticado.
+
+/api/expediente/{id}/cambiar_estado/
+  PATCH con {"estado": "AP"} o {"estado": "NOAP"}. Su intención es limitarse a
+  LG, pero el comportamiento actual permite cualquier rol autenticado.
+
+/api/rol/
+/api/rol/{id}/
+  Solo lista y detalle. Cualquier rol autenticado.
+
+/api/usuario/
+/api/usuario/{id}/
+  CRUD completo. Crear/modificar/eliminar: SU. Leer: cualquier rol.
+
+/api/documentoadjunto/
+/api/documentoadjunto/{id}/
+  CRUD completo. Cualquier rol autenticado.
+
+/api/documentos/
+/api/documentos/{id}/
+  CRUD de archivos de expedientes. Cualquier rol autenticado.
+  Para subir archivos se utiliza multipart/form-data.
+
+/api/historialpase/
+/api/historialpase/{id}/
+  Lista, detalle y creación. No permite editar ni borrar desde la API.
+  Cualquier rol autenticado.
+
+/api/notificacion/
+/api/notificacion/{id}/
+  CRUD completo. Crear: SU. Las otras acciones: cualquier rol autenticado.
+
+/api/historialaccion/
+/api/historialaccion/{id}/
+  Solo lista y detalle. Cualquier rol autenticado.
+
+/api/formulario/
+/api/formulario/{id}/
+  Lista, detalle y creación. Crear: TS. Leer: cualquier rol autenticado.
+
+/api/dictamen/
+/api/dictamen/{id}/
+  CRUD completo. Crear/eliminar: LG. Las otras acciones: cualquier rol.
+
+8.3. Panel y archivos
+
+GET /admin/
+  Panel administrativo de Django. Requiere un User con permisos staff.
+
+GET /media/...
+  Acceso a archivos subidos durante desarrollo.
+
+
+9. PANEL ADMINISTRATIVO
+-----------------------
+
+admin.py registra PostulanteTitular, IntegranteFamilia, EstadoExpediente,
+Expediente, Rol, Usuario, DocumentoAdjunto, HistorialPase, Notificacion,
+HistorialAccion, FormularioSocioHabitacional y DictamenLegal.
+
+Ventajas:
+
+- permite revisar y corregir datos sin desarrollar pantallas React adicionales;
+- ayuda a cargar catálogos iniciales;
+- facilita depuración y soporte durante el desarrollo.
+
+DocumentoExpediente no está registrado actualmente, por lo que sus archivos se
+administran por API o incorporándolo en admin.py.
+
+
+10. INSTALACION Y EJECUCION LOCAL
+---------------------------------
+
+Requisitos:
+
+- Python compatible con Django 6;
+- PostgreSQL accesible;
+- entorno virtual recomendado.
+
+Desde la raíz del repositorio, en PowerShell:
+
+  .\.venv\Scripts\Activate.ps1
+  pip install -r api\requirements.txt
+  cd api
+  python manage.py migrate
+  python manage.py createsuperuser
+  python manage.py runserver
+
+Variables mínimas esperadas en api/.env:
+
+  SECRET_KEY=<valor-secreto-largo>
+  DATABASE_URL=postgresql://<usuario>:<password>@<host>:<puerto>/<base>
+
+No se deben escribir valores reales en documentación ni versionar .env.
+
+Comandos útiles:
+
+  python manage.py check
+  python manage.py showmigrations
+  python manage.py makemigrations
+  python manage.py migrate
+  python manage.py test
+  python manage.py cargar_datos_prueba
+
+Antes de cargar datos de prueba debe existir EstadoExpediente con nombre SINI.
+El comando crea roles, pero actualmente no crea el catálogo de estados y usa
+get(nombre='SINI'), por lo que fallará si ese registro aún no existe.
+
+
+11. DESPLIEGUE
+--------------
+
+El backend incluye piezas orientadas a despliegue:
+
+- Gunicorn como servidor WSGI;
+- WhiteNoise para estáticos;
+- DATABASE_URL para base externa;
+- RENDER_EXTERNAL_HOSTNAME para incorporar el host de Render;
+- psycopg2 para PostgreSQL;
+- collectstatic mediante STATIC_ROOT.
+
+Un flujo habitual de construcción sería:
+
+  pip install -r api/requirements.txt
+  python api/manage.py collectstatic --noinput
+  python api/manage.py migrate
+
+Y un comando de inicio, ejecutado desde api/, sería conceptualmente:
+
+  gunicorn ipvu_backend.wsgi:application
+
+La configuración de producción debe usar variables de entorno, un servicio real
+para archivos media y un proveedor real de correo.
+
+
+12. VENTAJAS GENERALES DE LA ARQUITECTURA ACTUAL
+-------------------------------------------------
+
+- Separación de responsabilidades: modelo, representación, endpoints, permisos
+  y rutas están en módulos diferenciados.
+
+- Código declarativo: modelos, serializers y ViewSets describen mucho
+  comportamiento con poco código repetido.
+
+- Integridad relacional: claves foráneas, unicidad y políticas de borrado
+  trasladan reglas importantes también a la base.
+
+- Seguridad reutilizada: hashes, validadores y tokens provienen de Django y
+  Simple JWT en lugar de implementaciones propias.
+
+- Flujo institucional explícito: alta, asignación, visita, pase y dictamen están
+  reflejados en operaciones concretas.
+
+- API adecuada para SPA: JSON, CORS y JWT permiten integrar React sin acoplarlo
+  a templates del servidor.
+
+- Trazabilidad prevista: pases, historiales, dictámenes y timestamps permiten
+  reconstruir parte de la evolución de un expediente.
+
+- Despliegue portable: configuración por entorno, Gunicorn, PostgreSQL y
+  WhiteNoise son compatibles con plataformas como Render.
+
+- Evolución controlada: las migraciones versionan cambios del esquema.
+
+
+13. ESTADO ACTUAL, RIESGOS Y MEJORAS RECOMENDADAS
+-------------------------------------------------
+
+Esta sección documenta el comportamiento real encontrado. No significa que todas
+las mejoras deban realizarse inmediatamente; sirve para priorizar trabajo.
+
+13.1. Configuración de producción
+
+Estado actual:
+
+- DEBUG está fijo en True;
+- ALLOWED_HOSTS contiene '*';
+- CORS_ALLOW_ALL_ORIGINS está en True;
+- SECRET_KEY tiene un valor fallback inseguro;
+- el correo se imprime en consola;
+- FRONTEND_URL está fijo a localhost;
+- MEDIA se sirve con static() también fuera de una condición DEBUG.
+
+Recomendación: controlar estos valores por ambiente. En producción usar DEBUG
+False, hosts y orígenes explícitos, SECRET_KEY obligatoria, HTTPS, correo real y
+almacenamiento persistente/privado para documentos.
+
+13.2. Permiso global AllowAny
+
+Aunque las vistas actuales más importantes declaran permisos, REST_FRAMEWORK
+usa AllowAny por defecto. Una vista nueva sin permission_classes quedaría pública
+accidentalmente.
+
+Recomendación: usar IsAuthenticated como permiso global y marcar explícitamente
+solo login y recuperación como AllowAny.
+
+13.3. Falta de pruebas automáticas
+
+tests.py está vacío. manage.py check valida la configuración, pero no prueba
+permisos, flujos, respuestas ni efectos en la base.
+
+Prioridades sugeridas:
+
+- login, refresh, cambio inicial y reset;
+- matriz de permisos por rol y método;
+- creación atómica de postulante + expediente;
+- asignación rotativa con cero, una y varias TS;
+- aislamiento de expedientes por usuaria;
+- formulario y transiciones de estado;
+- pase, dictamen y reporte CSV;
+- carga, acceso y borrado de documentos.
+
+13.4. Filtros de expedientes inalcanzables
+
+get_queryset() retorna en las líneas iniciales y el bloque posterior que procesa
+estado, dni y usuario_asignado nunca se ejecuta. Actualmente solo funciona el
+filtro implícito para TS; los query parameters documentados en ese bloque no
+tienen efecto.
+
+Recomendación: construir primero queryset, aplicar filtros y retornar una sola
+vez al final. DRF Filter Backends también podría estandarizar este comportamiento.
+
+13.5. Operaciones que deberían ser atómicas
+
+La creación de postulante + expediente y User + Usuario realiza múltiples
+escrituras. Si falla la segunda, puede quedar un registro parcial.
+
+Recomendación: envolver cada operación compuesta en transaction.atomic() y
+validar de antemano la existencia del estado SINI y la unicidad de credenciales.
+
+13.6. Contraseña inicial igual al DNI
+
+Facilita el alta, pero el DNI es un dato predecible. La bandera de cambio forzado
+reduce el riesgo, aunque la contraseña sigue siendo válida hasta que el usuario
+ingresa y la cambia.
+
+Recomendación: generar una clave temporal aleatoria, limitar su vigencia y evitar
+enviarla por canales inseguros.
+
+13.7. Asignación rotativa y concurrencia
+
+El algoritmo depende del último expediente. Dos altas simultáneas podrían leer
+el mismo último registro y asignar la misma TS. Tampoco equilibra por carga real,
+ausencias o expedientes activos.
+
+Recomendación: si el volumen lo exige, guardar el turno en una fila bloqueada con
+select_for_update(), o asignar por menor cantidad de expedientes activos dentro
+de una transacción.
+
+13.8. Pase no cambia usuario_asignado
+
+HistorialPase cambia el estado según el rol de destino, pero no actualiza
+expediente.usuario_asignado. Por eso el responsable visible del expediente puede
+seguir siendo el usuario anterior.
+
+Recomendación: definir la regla institucional y, si el pase transfiere posesión,
+actualizar usuario_asignado en la misma transacción.
+
+13.9. HistorialAccion no se genera
+
+El código que crearía una acción al efectuar un pase está comentado y el ViewSet
+del historial es solo lectura. Actualmente no hay creación automática visible en
+el backend.
+
+Recomendación: centralizar una auditoría inmutable para altas, transferencias,
+cambios de estado, dictámenes y documentos.
+
+13.10. Inconsistencias en Notificacion
+
+El modelo define usuario_destimo, pero __str__ y la intención funcional usan
+usuario_destino. Además, expediente_relacionado apunta a User en lugar de
+Expediente. Al invocar __str__ se intentará leer un atributo inexistente.
+
+Recomendación: corregir nombres y relación mediante una migración. Como el cambio
+afecta datos, debe planificarse antes de renombrar directamente los campos.
+Además, leida está declarada de solo lectura en el serializer y no existe una
+acción específica para marcar una notificación como leída.
+
+13.11. Propiedad color sin retorno
+
+EstadoExpediente.color crea un diccionario, pero no retorna el color. Por lo
+tanto, la propiedad devuelve None.
+
+Recomendación:
+
+  return colores.get(self.nombre, 'gray')
+
+13.12. fecha_modificacion de IntegranteFamilia
+
+Usa auto_now_add=True, por lo que no cambia al editar el registro. Para reflejar
+modificaciones debería usar auto_now=True y una migración.
+
+13.13. Permisos y aislamiento por objeto
+
+Los permisos verifican el rol, no la propiedad de cada objeto. Ejemplos:
+
+- cualquier rol puede listar todos los pases, documentos e historiales;
+- las notificaciones no se filtran por destinatario;
+- cualquier rol puede modificar un DictamenLegal, porque solo create y destroy
+  se restringen a LG;
+- cualquier rol puede ejecutar cambiar_estado: el decorador indica IsLegales,
+  pero ExpedienteViewSet.get_permissions() no utiliza ese permiso para la acción
+  personalizada y retorna IsAnyRole;
+- cualquier rol puede administrar archivos mediante CRUD completo;
+- no hay validación de que una TS cree un formulario solo para su expediente.
+
+Recomendación: agregar filtros de queryset y permisos a nivel de objeto, según
+las reglas de confidencialidad del organismo. En cambiar_estado se debe agregar
+un caso explícito dentro de get_permissions() o delegar en la implementación de
+DRF para respetar permission_classes del decorador.
+
+13.14. Validación de archivos
+
+DocumentoExpediente acepta archivos sin reglas explícitas de tamaño, extensión,
+tipo MIME, nombre o análisis de contenido.
+
+Recomendación: limitar tamaño y formatos, renombrar de forma segura, controlar
+acceso, almacenar fuera del repositorio y evaluar análisis antivirus.
+
+13.15. Respuestas y manejo de errores
+
+cambiar_estado devuelve una respuesta exitosa incluso para un estado inválido y
+algunas búsquedas con .get() pueden producir un error 500 si faltan catálogos.
+
+Recomendación: usar códigos HTTP apropiados (400, 404 o 409), get_object_or_404 y
+errores de validación de DRF con mensajes consistentes.
+
+13.16. Rendimiento de listados
+
+ExpedienteSerializer consulta relaciones para construir la respuesta. Sin
+select_related, un listado grande puede producir consultas adicionales por cada
+fila (problema N+1).
+
+Recomendación: aplicar select_related('postulante_titular',
+'usuario_asignado', 'estado_expediente') y paginación global.
+
+13.17. fields='__all__'
+
+Es cómodo durante el desarrollo, pero un campo agregado en el modelo podría
+quedar expuesto o aceptado por la API sin una decisión consciente.
+
+Recomendación: declarar listas explícitas de fields en recursos sensibles y
+separar serializers de lectura, creación y actualización cuando sus contratos
+difieran.
+
+13.18. Catálogos y datos iniciales
+
+El comando cargar_datos_prueba presupone el estado SINI. No hay una migración de
+datos que cree todos los estados y los roles tampoco tienen restricción unique.
+
+Recomendación: crear una migración de datos idempotente para catálogos y agregar
+unicidad a Rol.nombre_rol si no se permiten duplicados.
+
+13.19. Borrado y conservación documental
+
+Varias relaciones usan CASCADE, incluyendo titular -> expediente y expediente ->
+documentos/formularios/pases. Puede ser adecuado para desarrollo, pero un sistema
+administrativo suele requerir conservación y trazabilidad.
+
+Recomendación: acordar una política de retención, considerar borrado lógico y
+restringir DELETE en producción.
+
+13.20. Idioma
+
+LANGUAGE_CODE está en en-us mientras el dominio y los mensajes están en español.
+Configurar es-ar mejoraría validaciones y textos generados por Django.
+
+13.21. Duplicación de datos entre User y Usuario
+
+El email se guarda tanto en User como en Usuario durante el alta, mientras nombre
+y apellido solo se guardan en Usuario. Una modificación posterior del perfil no
+sincroniza necesariamente ambas tablas. Esto puede producir emails divergentes y
+nombres vacíos al serializar el usuario asignado desde User.
+
+Recomendación: definir una fuente única para cada dato, leerla consistentemente
+en los serializers y sincronizarla de forma transaccional cuando corresponda.
+
+
+14. VERIFICACION REALIZADA PARA ESTA DOCUMENTACION
+--------------------------------------------------
+
+Se relevaron la configuración, dependencias, modelos, migraciones, serializers,
+vistas, permisos, rutas, administración y comando de datos de prueba.
+
+Se ejecutó:
+
+  .\.venv\Scripts\python.exe api\manage.py check
+
+Resultado:
+
+  System check identified no issues (0 silenced).
+
+Esto confirma que Django puede cargar la configuración y que sus verificaciones
+estáticas no detectan errores. No sustituye una suite funcional: tests.py está
+vacío y no se ejecutaron pruebas integrales contra una base de prueba.
+
+También se ejecutó:
+
+  .\.venv\Scripts\python.exe api\manage.py check --deploy
+
+El chequeo de despliegue informó seis advertencias de seguridad: falta configurar
+HSTS, redirección HTTPS, una clave secreta robusta, cookies de sesión seguras,
+cookies CSRF seguras y DEBUG=False. Son coherentes con los puntos de producción
+descritos en la sección 13.1 y deben resolverse antes de publicar el sistema.
+
+Por último, se comprobó directamente qué permiso instancia la acción
+cambiar_estado. El resultado fue IsAnyRole, confirmando la interacción entre el
+get_permissions() personalizado y el decorador de la acción.
+
+
+15. RESUMEN
+-----------
+
+El backend utiliza una base tecnológica sólida: Django para el dominio y la
+persistencia, Django REST Framework para la API, Simple JWT para autenticación y
+PostgreSQL para integridad relacional. La organización por modelos, serializers,
+ViewSets, permisos y routers permite avanzar rápido y mantiene el código legible.
+
+Sus decisiones más valiosas son la reutilización del sistema de autenticación de
+Django, la autorización centralizada por roles, las operaciones de negocio en
+perform_create, la asignación automática y el historial mediante modelos
+relacionados.
+
+Para pasar de una implementación de desarrollo a una solución productiva, las
+prioridades son cerrar la configuración de seguridad, añadir pruebas, hacer
+atómicas las operaciones compuestas, corregir las inconsistencias señaladas,
+aplicar permisos por objeto y proteger los documentos. Con esas mejoras, la base
+actual puede evolucionar sin reemplazar su arquitectura principal.
