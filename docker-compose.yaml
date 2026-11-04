@@ -1,18 +1,16 @@
-version: '3.8'
-
 services:
-    api:
+  api:
     build:
       context: ./api
-      # Sin dockerfile: Nixpacks detecta Python automáticamente
     restart: unless-stopped
-    # ... resto igual
-    
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY:-cambia_esto_por_una_clave_larga}
+      - ALLOWED_HOSTS=api.ipvu.itseprueba.com.ar
+      - CSRF_TRUSTED_ORIGINS=https://api.ipvu.itseprueba.com.ar
 
-    client:
-      build:
-        context: ./client
-      # Sin dockerfile: Nixpacks detecta Node automáticamente
-      restart: unless-stopped
-    # ... resto igual
+  client:
+    build:
+      context: ./client
+    restart: unless-stopped
       
