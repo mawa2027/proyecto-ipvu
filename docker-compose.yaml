@@ -20,9 +20,9 @@ services:
       build:
         context: ./client
       # Sin dockerfile: Nixpacks detecta Node automáticamente
-    restart: unless-stopped
+      restart: unless-stopped
     # ... resto igual
-    environment:
+      environment:
       - SERVICE_FQDN_CLIENT
       # Si el frontend necesita la URL de la API, agrégala aquí
       # VITE_API_URL: https://api.ipvu.itseprueba.com.ar/api
