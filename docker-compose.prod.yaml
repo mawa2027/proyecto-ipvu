@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile  # Si no existe, Coolify intentará usar Nixpacks
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_API
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY:-cambia_esto_por_una_clave_larga}
+      - ALLOWED_HOSTS=api.ipvu.itseprueba.com.ar
+      - CSRF_TRUSTED_ORIGINS=https://api.ipvu.itseprueba.com.ar
+      # Agrega aquí las variables de base de datos si el proyecto las usa
+    # Sin 'ports:' para que Coolify asigne dominio
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile  # Si no existe, Coolify usará Nixpacks
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_CLIENT
+      # Si el frontend necesita la URL de la API, agrégala aquí
+      # VITE_API_URL: https://api.ipvu.itseprueba.com.ar/api
+    # Sin 'ports:' para que Coolify asigne dominio
