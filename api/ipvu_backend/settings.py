@@ -216,7 +216,7 @@ if USAR_HTTPS:
     CSRF_TRUSTED_ORIGINS = [
     'https://ipvu.itseprueba.com.ar',
     'https://api-ipvu.itseprueba.com.ar',]
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     # una hora para empezar; subirlo (ej. 31536000) cuando se confirme que todo funciona por HTTPS
