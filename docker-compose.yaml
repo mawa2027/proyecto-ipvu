@@ -8,6 +8,7 @@ services:
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY:-02437def0cc60f5a1c88d9de010aa4af5319ab88afdcd0b1c0331f7b089e361c}
       - ALLOWED_HOSTS=api-ipvu.itseprueba.com.ar
+      - USAR_HTTPS=True
       - CSRF_TRUSTED_ORIGINS=https://api-ipvu.itseprueba.com.ar,https://ipvu.itseprueba.com.ar
 
   client:
