@@ -11,7 +11,7 @@ services:
       - USAR_HTTPS=True
       - CORS_ALLOWED_ORIGINS=https://ipvu.itseprueba.com.ar
 
-    client:
+  client:
     build:
       context: ./client
       args:
