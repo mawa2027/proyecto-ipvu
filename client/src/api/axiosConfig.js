@@ -2,9 +2,8 @@ import axios from "axios"
 
 export const api = axios.create({
     baseURL: import.meta.env.PROD
-    ? "https://api.ipvu.itseprueba.com.ar/api"
-    : "http://127.0.0.1:8000/api",
-    headers: {
+    ? "https://api-ipvu.itseprueba.com.ar/api"
+        headers: {
         "Content-Type": "application/json"
     }
 })
