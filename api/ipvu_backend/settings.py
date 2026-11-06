@@ -215,7 +215,7 @@ if USAR_HTTPS:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     CSRF_TRUSTED_ORIGINS = [
     'https://ipvu.itseprueba.com.ar',
-    'https://api.ipvu.itseprueba.com.ar',]
+    'https://api-ipvu.itseprueba.com.ar',]
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
