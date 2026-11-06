@@ -10,6 +10,7 @@ services:
       - ALLOWED_HOSTS=api-ipvu.itseprueba.com.ar
       - USAR_HTTPS=True
       - CSRF_TRUSTED_ORIGINS=https://api-ipvu.itseprueba.com.ar,https://ipvu.itseprueba.com.ar
+      - CORS_ALLOWED_ORIGINS=https://ipvu.itseprueba.com.ar
 
   client:
     build:
