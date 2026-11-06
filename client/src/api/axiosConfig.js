@@ -2,7 +2,7 @@ import axios from "axios"
 
 export const api = axios.create({
     baseURL: import.meta.env.PROD
-    ? "https://api-ipvu.itseprueba.com.ar/api"
+    ? "https://api-ipvu.itseprueba.com.ar/api",
         headers: {
         "Content-Type": "application/json"
     }
