@@ -5,8 +5,7 @@ RUN npm install
 COPY . .
 
 # Recibir la URL de la API como argumento de build y exponerla para Vite
-ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_API_URL=https://api-ipvu.itseprueba.com.ar/api
 
 RUN npm run build
 
