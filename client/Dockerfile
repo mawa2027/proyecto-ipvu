@@ -6,7 +6,7 @@ COPY . .
 
 # Recibir la URL de la API como argumento de build y exponerla para Vite
 ENV VITE_API_URL=https://api-ipvu.itseprueba.com.ar/api
-
+RUN echo "build $(date)"
 RUN npm run build
 
 # Detectar si el build quedó en dist o en build
